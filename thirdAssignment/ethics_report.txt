@@ -1,0 +1,206 @@
+ETHICAL CONSIDERATIONS
+Customer churn predictor, third assignment
+
+
+1. WHAT THE SYSTEM DECIDES
+
+The backend serves a logistic regression that estimates the probability a
+Telco customer will cancel. A prediction of 1 flags the customer, and in
+practice a flag triggers a retention action: a call, a discount, a contract
+offer.
+
+That framing decides everything else in this report. Being flagged is a
+benefit here, not a penalty. A false positive gives a discount to someone who
+was staying anyway, which costs the company money and leaves the customer
+better off. A false negative lets a customer leave without ever being offered
+anything.
+
+If the flag triggered something else, for example higher prices, lower support
+priority, or being written off as already lost, the sign of every argument
+below would flip. The model does not know what the flag is used for, and
+nothing in the API records it. That is the first ethical gap: the system is
+deployed without its purpose being written down anywhere a user can see.
+
+
+2. THE THRESHOLD IS THE REAL DECISION
+
+The model produces a probability. Turning that into a yes or no needs a cut,
+and the cut is a policy choice, not a technical one. There are two defensible criteria
+disagree by a wide margin:
+
+  threshold            flagged    missed churners   wasted offers    F1
+  0.500 (default)         1175                142             569   0.630
+  0.584 (best F1)          987                197             436   0.635
+  0.354 (lowest cost)     1538                 71             861   0.592
+
+Moving from the F1 threshold to the cost threshold flags 551 more customers,
+rescues 126 who would otherwise have been missed, and hands 425 discounts to
+people who were not leaving.
+
+Neither is correct. Maximising F1 treats a lost customer and a wasted discount
+as equally bad, which nobody actually believes. The cost threshold assumes a
+lost customer is five times worse, which is a number I picked with no data
+behind it. The honest description is that the app lets a human choose between
+two arbitrary weightings, and the weighting is the ethical content.
+
+Exposing the threshold as a slider is better than hiding it, because it makes
+the choice visible instead of burying 0.5 in a library default. But the
+implementation has two problems. The threshold is global server state, so one
+person dragging the slider changes every prediction every other caller
+receives. And nothing records who changed it, when, or why. A decision that
+moves 551 customers in or out of a retention programme leaves no trace.
+
+
+3. WHO GETS FLAGGED
+
+Measured on the test set at threshold 0.584. TPR is the share of churners
+correctly flagged, FPR the share of non-churners wrongly flagged, PPV the
+share of flagged customers who really churn.
+
+                       n    churn rate   flagged     TPR     FPR     PPV
+  gender F          1434         0.268     0.349   0.727   0.211   0.557
+  gender M          1384         0.263     0.351   0.747   0.210   0.560
+
+  Senior no         2352         0.237     0.308   0.709   0.184   0.545
+  Senior yes         466         0.410     0.562   0.817   0.385   0.595
+
+  Dependents no     1969         0.315     0.432   0.775   0.274   0.566
+  Dependents yes     849         0.150     0.161   0.551   0.093   0.511
+
+Gender shows no disparity worth discussing. The rates match to within a
+percentage point, which is consistent with the exploratory analysis, where
+churn was 26.9 percent for women and 26.2 percent for men.
+
+Age and family status are a different matter. A senior citizen is flagged
+56.2 percent of the time against 30.8 percent for everyone else. Most of that
+follows the base rate, since seniors churn at 41.0 percent against 23.7
+percent, so the model is reproducing a real difference rather than inventing
+one. But the error rates do not follow along evenly. A senior who was not
+going to leave has a 38.5 percent chance of being offered a discount, against
+18.4 percent for a non-senior. Positive predictive value, by contrast, is
+nearly equal at 0.595 and 0.545.
+
+That combination is not a bug to be fixed. When two groups have different base
+rates, equal PPV and equal FPR cannot both hold. Choosing which to equalise is
+a value judgement. Equal PPV says a flag should mean the same thing whoever
+receives it. Equal FPR says no group should be bothered more often for no
+reason. Here the model happens to deliver roughly the first and clearly not
+the second, and nobody made that choice deliberately.
+
+Customers with dependents are affected in the opposite direction. Only 55.1
+percent of churning customers with dependents are caught, against 77.5 percent
+of those without. If the retention offer is worth having, families are the
+group least likely to be offered it.
+
+The threshold makes these gaps worse, not better. At 0.354 the senior
+selection rate rises to 77.3 percent, so three quarters of senior customers
+are flagged and exactly half of those flags are wrong.
+
+None of this is visible in the application. The metrics endpoint returns one
+global set of numbers. A user can see that precision is 0.558 and cannot see
+that the false positive rate differs by a factor of two across age groups.
+
+
+4. WHAT THE MODEL RELIES ON
+
+Permutation importance, scored with roc_auc so the numbers do not shift when
+the threshold moves:
+
+  tenure            +0.2435
+  TotalCharges      +0.0407
+  Contract          +0.0308
+  everything else   below 0.005
+
+  Dependents        +0.0008
+  SeniorCitizen     +0.0005
+  gender            -0.0000
+  Partner           -0.0001
+
+The coefficients agree. The three largest are Contract_Two year at -0.595,
+Contract_Month-to-month at +0.593 and InternetService_Fiber optic at +0.309.
+
+So the model reads how long someone has been a customer and what contract they
+are on. The four demographic columns contribute essentially nothing, and
+removing them would change almost no predictions.
+
+That is reassuring and it does not resolve section 3. The group differences
+exist anyway, because tenure and contract type are correlated with age and
+family status. Deleting the protected attributes would leave the disparity
+intact while removing the ability to measure it. "The model does not use age"
+and "the model treats age groups differently" are both true here, which is
+exactly why fairness has to be measured on outcomes rather than argued from
+the feature list.
+
+
+5. USABILITY
+
+The API takes features as they appear in the data. Contract=Month-to-month
+and tenure=12 work directly, because the fitted pipeline carries the encoder
+and the imputer. The reference implementation we were shown in class requires
+pre-standardised floats such as age=0.970798, which means a caller cannot use
+it without the training set's mean and standard deviation. Moving that work
+behind the API removes a whole class of silent error.
+
+The /schema endpoint makes the service self-describing, and the frontend
+builds its form from it rather than hardcoding 19 fields. Errors are explicit:
+an unseen category returns 400 naming the offending field, rather than being
+silently encoded as all zeros and producing a confident wrong answer.
+
+Against that:
+
+- Nineteen fields is a long form. The defaults are the dataset median and
+  mode, and that default customer scores 62.4 percent, above the threshold.
+  Anyone who opens the app and presses Predict without editing anything gets
+  "Churn risk" for a customer they never described. That is a misleading
+  default and I would change it.
+- The threshold slider takes effect immediately, with no confirmation, and is
+  shared by all users.
+- There is no authentication, no logging, and the backend runs on Flask's
+  development server in debug mode.
+
+So it is easy to use and not ready to be used.
+
+
+6. TRUSTWORTHINESS
+
+The model is honest about being mediocre, if anyone reads the numbers. At
+threshold 0.584, 436 of the 987 flagged customers were not going to churn and
+197 of the 748 real churners were missed. Roughly two in five flags are wrong
+and one in four churners is never caught. ROC AUC is 0.8415, which is useful
+for ranking and nowhere near good enough for an automatic decision.
+
+Three specific reasons to discount the reported numbers:
+
+The threshold is chosen by maximising F1 on the test set, and the application
+then reports test metrics at that threshold. That is circular. Choosing it
+out-of-fold on the training data instead gives 0.501, and the test F1 at that
+threshold is 0.6290 rather than 0.6352. The headline is about 0.006
+optimistic. Small, but the app presents it as an unbiased result and it is
+not. Permutation importance is computed on the same test set.
+
+Everything rests on one 60/40 split with one seed. The previous assignment
+found four models within 0.012 of each other on this data and the ranking
+reordered between cross validation and the test set. Calling logistic
+regression the best model is not supported, it tied.
+
+The optimiser converged after 1866 of the 2000 iterations allowed. It finished,
+but not with much room, and that is a consequence of the winning configuration
+using no feature scaling.
+
+None of this reaches the user. The API returns a probability to sixteen
+decimal places, which implies a precision the model does not have.
+
+
+7. WHAT I WOULD WANT BEFORE THIS WENT ANYWHERE NEAR CUSTOMERS
+
+- Choose the threshold out-of-fold, so the reported metrics are not measured
+  on the data the threshold was fitted to.
+- Report metrics per group in the API, not just globally, so the disparities
+  in section 3 are visible to whoever is moving the slider.
+- Log threshold changes with a user and a reason, and make the threshold
+  per-client rather than global.
+- Write down what a flag actually triggers, and re-run section 3 with that in
+  mind, because whether these gaps are harmful depends entirely on it.
+- A production server, authentication, and debug mode off.
+
+The first two are the ones that matter. The rest is engineering.
