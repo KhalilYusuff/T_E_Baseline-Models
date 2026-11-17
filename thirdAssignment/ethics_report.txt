@@ -25,7 +25,7 @@ deployed without its purpose being written down anywhere a user can see.
 2. THE THRESHOLD IS THE REAL DECISION
 
 The model produces a probability. Turning that into a yes or no needs a cut,
-and the cut is a policy choice, not a technical one. There are two defensible criteria
+and the cut is a policy choice, not a technical one. Two defensible criteria
 disagree by a wide margin:
 
   threshold            flagged    missed churners   wasted offers    F1
@@ -179,9 +179,11 @@ optimistic. Small, but the app presents it as an unbiased result and it is
 not. Permutation importance is computed on the same test set.
 
 Everything rests on one 60/40 split with one seed. The previous assignment
-found four models within 0.012 of each other on this data and the ranking
+found five models within 0.013 of each other on this data and the ranking
 reordered between cross validation and the test set. Calling logistic
-regression the best model is not supported, it tied.
+regression the best model is not supported, it tied. It was chosen here for
+being the one of those five that can explain an individual prediction, not
+for being the most accurate.
 
 The optimiser converged after 1866 of the 2000 iterations allowed. It finished,
 but not with much room, and that is a consequence of the winning configuration

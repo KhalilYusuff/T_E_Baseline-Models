@@ -4,8 +4,8 @@ Trains the model the API serves and writes the artifacts it needs.
 Run this once before starting the API 
     python train.py
 
-It rebuilds the logistic regression that won the test set in the second
-assignment, using the parameters that search found, and saves:
+It rebuilds the logistic regression that was among the best models in the
+second assignment, using the parameters that search found, and saves:
 
     model.pickle  - the fitted pipeline, preprocessing included
     artifacts.json - test set probabilities, feature importance, input schema
@@ -39,7 +39,7 @@ FALSE_POSITIVE_COST = 1
 
 
 def load_dataset():
-    """Same cleanup as the second assignment, so the split matches."""
+    """Same cleanup as the second assignment."""
     dataset = pd.read_csv(DATA).drop(columns='customerID')
     # TotalCharges arrives as text because 11 rows hold a single space.
     dataset['TotalCharges'] = pd.to_numeric(dataset['TotalCharges'], errors='coerce')
@@ -117,7 +117,9 @@ def main():
     targets = dataset['Churn']
     categorical = [c for c in features.columns if c not in NUMERIC]
 
-    # The same 60/40 stratified split as the second assignment.
+    # A 60/40 stratified split. The second assignment ended up on 75/25 after
+    # feedback; this holds back more rows instead, which costs the model a
+    # little and buys a tighter estimate of what it is worth.
     features_trainval, features_test, targets_trainval, targets_test = train_test_split(
         features, targets, test_size=0.4, shuffle=True,
         random_state=RANDOM_STATE, stratify=targets)
